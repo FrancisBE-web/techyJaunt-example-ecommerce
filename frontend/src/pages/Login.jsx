@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { API_URL, api } from "../api";
+import { api, startGoogleSignIn } from "../api";
 import { setToken } from "../auth";
 
 export default function Login({ onLogin }) {
@@ -52,9 +52,13 @@ export default function Login({ onLogin }) {
           Continue
         </button>
       </form>
-      <a className="button ghost" href={`${API_URL}/api/v1/auth/google`}>
+      <button
+        className="button ghost"
+        type="button"
+        onClick={() => startGoogleSignIn().catch((err) => setError(err.message))}
+      >
         Continue with Google
-      </a>
+      </button>
       <p className="muted">
         New here? <Link to="/signup">Create an account</Link>
       </p>

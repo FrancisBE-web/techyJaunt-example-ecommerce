@@ -22,3 +22,8 @@ export async function api(path, { method = "GET", body, token } = {}) {
   }
   return data;
 }
+
+export async function startGoogleSignIn() {
+  const { url } = await api("/api/v1/auth/google");
+  window.location.assign(url);
+}

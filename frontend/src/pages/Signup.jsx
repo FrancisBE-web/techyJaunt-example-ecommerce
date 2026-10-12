@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { API_URL, api } from "../api";
+import { api, startGoogleSignIn } from "../api";
 
 export default function Signup() {
   const [form, setForm] = useState({
@@ -93,9 +93,13 @@ export default function Signup() {
           </button>
         </form>
       )}
-      <a className="button ghost" href={`${API_URL}/api/v1/auth/google`}>
+      <button
+        className="button ghost"
+        type="button"
+        onClick={() => startGoogleSignIn().catch((err) => setError(err.message))}
+      >
         Continue with Google
-      </a>
+      </button>
     </section>
   );
 }

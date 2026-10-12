@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user.models");
-
-const frontendUrl = () => process.env.FRONTEND_URL || "http://localhost:5173";
+const toPublicUser = require("../helpers/publicUser");
 
 const googleAuth = (req, res) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CALLBACK_URL) {
@@ -20,21 +19,24 @@ const googleAuth = (req, res) => {
     prompt: "select_account",
   });
 
-  return res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+  return res
+    .status(200)
+    .json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
 };
 
 const googleCallback = async (req, res) => {
-  const { code, state } = req.query;
-  if (!code || !state || req.query.error) {
-    return res.redirect(`${frontendUrl()}/login?error=google`);
-  }
+  const { code, state } = req.body;
 
   try {
     const payload = jwt.verify(state, process.env.JWT_SECRET);
     if (payload.purpose !== "google") {
-      return res.redirect(`${frontendUrl()}/login?error=google`);
+      return res.status(400).json({ message: "Invalid Google sign-in state" });
     }
+  } catch (error) {
+    return res.status(400).json({ message: "Invalid or expired Google sign-in state" });
+  }
 
+  try {
     const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -48,7 +50,7 @@ const googleCallback = async (req, res) => {
     });
     const tokenData = await tokenResponse.json();
     if (!tokenResponse.ok) {
-      return res.redirect(`${frontendUrl()}/login?error=google`);
+      return res.status(400).json({ message: "Google sign-in failed" });
     }
 
     const profileResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
@@ -56,7 +58,7 @@ const googleCallback = async (req, res) => {
     });
     const profile = await profileResponse.json();
     if (!profileResponse.ok || !profile.email || !profile.id) {
-      return res.redirect(`${frontendUrl()}/login?error=google`);
+      return res.status(400).json({ message: "Could not read Google profile" });
     }
 
     let user = await User.findOne({ googleId: profile.id });
@@ -71,8 +73,8 @@ const googleCallback = async (req, res) => {
         await user.save();
       } else {
         user = await User.create({
-          firstName: String(profile.given_name || "Aether").slice(0, 50),
-          lastName: String(profile.family_name || "User").slice(0, 50),
+          firstName: (profile.given_name || profile.name || profile.email.split("@")[0]).slice(0, 50),
+          lastName: (profile.family_name || "-").slice(0, 50),
           email: profile.email,
           googleId: profile.id,
           isVerified: true,
@@ -87,10 +89,12 @@ const googleCallback = async (req, res) => {
       { expiresIn: "1h" },
     );
 
-    return res.redirect(`${frontendUrl()}/auth/callback?token=${token}`);
+    return res
+      .status(200)
+      .json({ message: "Login successful", user: toPublicUser(user), token });
   } catch (error) {
     console.log(error);
-    return res.redirect(`${frontendUrl()}/login?error=google`);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
