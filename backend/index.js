@@ -11,6 +11,7 @@ const authRoutes = require('./src/routes/auth.routes');
 const categoryRoutes = require('./src/routes/category.routes');
 const productRoutes = require('./src/routes/product.routes');
 const cartRoutes = require('./src/routes/cart.routes');
+const walletsRoutes = require('./src/routes/routes.wallets');
 
 
 const PORT = process.env.PORT || 3000;
@@ -30,6 +31,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/categories', categoryRoutes);
 app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/cart', cartRoutes);
+app.use('/api/v1/wallets', walletsRoutes);
 
 
 app.listen(PORT, () => {

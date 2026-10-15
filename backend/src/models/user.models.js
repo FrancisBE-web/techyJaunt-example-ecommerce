@@ -64,7 +64,11 @@ const userSchema = new Schema({
     phone: {
         type: String,
         maxlength: 20,
-        default: null
+        default: null,
+        unique: true,
+        required: function requiredPhone() {
+            return !this.googleId;
+        }
     },
     address: {
         type: addressSchema,
