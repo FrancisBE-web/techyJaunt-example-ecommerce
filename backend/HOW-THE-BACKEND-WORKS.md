@@ -298,8 +298,8 @@ The full URL adds the prefix from `index.js`. Signup is `POST /api/v1/user/signu
 
 | URL | Worker | Job |
 | --- | --- | --- |
-| `GET /api/v1/auth/google` | `googleAuth` | Redirect the browser to Google. |
-| `GET /api/v1/auth/google/callback` | `googleCallback` | Trade Google's code for a profile, find or create the user, redirect home with our JWT. |
+| `GET /api/v1/auth/google` | `googleAuth` | Return the Google consent URL as JSON. |
+| `POST /api/v1/auth/google/callback` | `googleCallback` | Take `{ code, state }` from the frontend, trade the code for a profile, find or create the user, return our JWT and user. |
 
 ### Categories — `src/routes/category.routes.js`
 
@@ -410,13 +410,13 @@ Copies only `firstName`, `lastName`, `phone`, and address fields onto `req.user`
 
 1. Stop if Google env vars are missing.
 2. `jwt.sign({ purpose: "google" })` makes a 10-minute `state` note.
-3. `res.redirect` sends the browser to Google's consent page with our client id, callback URL, scopes, and that state.
+3. Return `{ url }`: Google's consent page with our client id, callback URL, scopes, and that state. The frontend sends the browser there.
 
 **`googleCallback`**
 
 ```mermaid
 flowchart TD
-  a["Google redirects back with code and state"] --> b["jwt.verify state"]
+  a["Frontend posts code and state"] --> b["jwt.verify state"]
   b --> c["fetch Google token URL"]
   c --> d["fetch Google userinfo"]
   d --> e{"User.findOne googleId"}
@@ -426,7 +426,7 @@ flowchart TD
   f -->|missing| n["User.create without a password"]
   g --> h
   n --> h
-  h --> i["redirect to frontend /auth/callback?token="]
+  h --> i["respond with token and user"]
 ```
 
 `fetch` here is Node calling Google. The browser does not see the client secret.
@@ -498,12 +498,12 @@ The client does not send a price. The price is always read from the product.
 
 ### Story B — Google, still on our server
 
-1. Browser opens `/api/v1/auth/google`.
-2. We redirect them to Google with a signed `state`.
-3. Google sends them back with a `code`.
+1. The website calls `GET /api/v1/auth/google` and gets back a Google URL.
+2. The website sends the browser to that URL. It carries a signed `state`.
+3. Google sends the browser back to the website's `/auth/callback` with a `code`. The website posts `code` and `state` to `POST /api/v1/auth/google/callback`.
 4. Our server, not the browser, trades the code for their name and email.
 5. We find or create a user with `googleId` and no password.
-6. We redirect to the website with our JWT.
+6. We answer with our JWT and the user, as JSON. The API never redirects.
 
 ### Story C — add a phone to the cart
 

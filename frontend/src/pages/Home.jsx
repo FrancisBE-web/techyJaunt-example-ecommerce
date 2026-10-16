@@ -1,195 +1,308 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { api, formatPrice } from "../api";
-import AetherScene from "../components/AetherScene";
+import { api } from "../api";
+import { CATEGORIES } from "../catalog";
+import CardSkeleton from "../components/CardSkeleton";
+import LiquidMark from "../components/LiquidMark";
+import { sized } from "../components/ProductArt";
 import ProductCard from "../components/ProductCard";
+import { useReducedMotion } from "../hooks";
 
 gsap.registerPlugin(ScrollTrigger);
 
-const ROOMS = [
-  {
-    id: "phones",
-    index: "01",
-    title: "Phones",
-    line: "The object in your hand for most of the day.",
-  },
-  {
-    id: "computers",
-    index: "02",
-    title: "Computers",
-    line: "Where the work actually sits.",
-  },
-  {
-    id: "audio",
-    index: "03",
-    title: "Audio",
-    line: "Sound you wear, or set on a table.",
-  },
-  {
-    id: "gaming",
-    index: "04",
-    title: "Gaming",
-    line: "The controls around the screen.",
-  },
-  {
-    id: "accessories",
-    index: "05",
-    title: "Accessories",
-    line: "Cables, cases, and the rest of the kit.",
-  },
-];
+const VoyageScene = lazy(() => import("../components/three/VoyageScene"));
+
+function Voyage({ counts, photos }) {
+  const sectionRef = useRef(null);
+  const progressRef = useRef(0);
+  const [active, setActive] = useState(0);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    const trigger = ScrollTrigger.create({
+      trigger: section,
+      start: "top top",
+      end: "bottom bottom",
+      onUpdate: (self) => {
+        progressRef.current = self.progress;
+        setActive(Math.round(self.progress * (CATEGORIES.length - 1)));
+      },
+    });
+
+    // Stop rendering the 3D world while it is off screen.
+    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting));
+    observer.observe(section);
+
+    return () => {
+      trigger.kill();
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <section ref={sectionRef} className="voyage" aria-label="Browse by category">
+      <div className="voyage-stage">
+        <Suspense fallback={<div className="voyage-canvas" />}>
+          <VoyageScene progressRef={progressRef} active={visible} photos={photos} />
+        </Suspense>
+        <ol className="voyage-rail mono" aria-hidden="true">
+          {CATEGORIES.map((category, index) => (
+            <li key={category.id} className={index === active ? "on" : ""}>
+              {category.index}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {CATEGORIES.map((category, index) => (
+        <div
+          key={category.id}
+          id={category.id}
+          className={`voyage-step ${index % 2 ? "right" : "left"}`}
+        >
+          <article
+            className={`voyage-card glass ${index === active ? "on" : ""}`}
+            style={{ "--accent": category.color }}
+          >
+            <p className="eyebrow mono">
+              {category.index} / {String(CATEGORIES.length).padStart(2, "0")}
+            </p>
+            <h2>{category.title}</h2>
+            <p className="lede">{category.line}</p>
+            <div className="voyage-meta">
+              <span className="mono">
+                {counts[category.id] ?? "–"} {counts[category.id] === 1 ? "piece" : "pieces"}
+              </span>
+              <Link className="button ghost small" to={`/shop?category=${category.id}`}>
+                Enter {category.title.toLowerCase()}
+              </Link>
+            </div>
+          </article>
+        </div>
+      ))}
+    </section>
+  );
+}
 
 export default function Home() {
   const rootRef = useRef(null);
+  const reducedMotion = useReducedMotion();
   const [products, setProducts] = useState([]);
-  const [notice, setNotice] = useState("");
+  const [total, setTotal] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    api("/api/v1/products?limit=20")
-      .then((data) => setProducts(data.products || []))
-      .catch((error) => setNotice(error.message));
+    api("/api/v1/products?limit=50")
+      .then((data) => {
+        setProducts(data.products || []);
+        setTotal(data.total);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
-  const lead = useMemo(
-    () => products.find((product) => product.category === "computers") || products[0],
+  const counts = useMemo(
+    () =>
+      products.reduce((acc, product) => {
+        acc[product.category] = (acc[product.category] || 0) + 1;
+        return acc;
+      }, {}),
     [products],
   );
 
-  const rooms = useMemo(
+  // A photo for each stop on the tour: the category's hero product, else any photo in it.
+  const photos = useMemo(
     () =>
-      ROOMS.map((room) => ({
-        ...room,
-        products: products
-          .filter((product) => product.category === room.id && product.id !== lead?.id)
-          .slice(0, 2),
-      })),
-    [products, lead],
+      Object.fromEntries(
+        CATEGORIES.map((category) => {
+          const inCategory = products.filter(
+            (product) => product.category === category.id && product.image?.url,
+          );
+          const pick = inCategory.find((product) => product.name === category.hero) || inCategory[0];
+          const url = pick && (sized(pick.image.url, 1024) || pick.image.url);
+          return [category.id, url];
+        }),
+      ),
+    [products],
   );
 
+  // One from each category, then fill to six.
+  const featured = useMemo(() => {
+    const picks = CATEGORIES.map((category) =>
+      products.find((product) => product.category === category.id),
+    ).filter(Boolean);
+    const rest = products.filter((product) => !picks.includes(product));
+    return [...picks, ...rest].slice(0, 6);
+  }, [products]);
+
+  const lowest = products.length ? Math.min(...products.map((product) => product.price)) : null;
+
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) {
+    if (reducedMotion) {
       return undefined;
     }
-
     const context = gsap.context(() => {
       gsap.from(".hero-line", {
-        y: 36,
+        yPercent: 110,
+        duration: 1.2,
+        stagger: 0.08,
+        ease: "expo.out",
+      });
+      gsap.from(".hero-fade", {
+        y: 24,
         autoAlpha: 0,
         duration: 1,
-        stagger: 0.1,
+        delay: 0.4,
+        stagger: 0.08,
         ease: "power3.out",
       });
-
-      gsap.to(".hero-stage", {
-        yPercent: -12,
+      gsap.from(".hero-mark", { scale: 0.7, autoAlpha: 0, duration: 1.6, ease: "expo.out" });
+      gsap.to(".hero-mark", {
+        yPercent: 25,
+        rotate: 8,
         ease: "none",
-        scrollTrigger: {
-          trigger: ".hero",
-          start: "top top",
-          end: "bottom top",
-          scrub: true,
-        },
+        scrollTrigger: { trigger: ".hero", start: "top top", end: "bottom top", scrub: true },
       });
+    }, rootRef);
+    return () => context.revert();
+  }, [reducedMotion]);
 
+  useEffect(() => {
+    if (reducedMotion || loading) {
+      return undefined;
+    }
+    const context = gsap.context(() => {
       gsap.utils.toArray(".reveal").forEach((element) => {
         gsap.from(element, {
-          y: 32,
+          y: 40,
           autoAlpha: 0,
-          duration: 0.8,
-          ease: "power2.out",
-          scrollTrigger: {
-            trigger: element,
-            start: "top 86%",
-          },
+          duration: 0.9,
+          ease: "power3.out",
+          scrollTrigger: { trigger: element, start: "top 88%" },
         });
       });
-    }, root);
-
+    }, rootRef);
     return () => context.revert();
-  }, [products.length]);
+  }, [reducedMotion, loading]);
 
   return (
     <div ref={rootRef}>
-      <section className="hero">
+      <section className="hero wrap">
         <div className="hero-copy">
-          <p className="eyebrow hero-line">Aether catalog</p>
-          <h1>
-            <span className="hero-line">Personal technology,</span>
-            <span className="hero-line">edited down.</span>
-          </h1>
-          <p className="lede hero-line">
-            Five rooms. Phones, computers, sound, play, and the pieces that hold them together.
-            One price. One cart.
+          <p className="chip mono hero-fade">
+            <span className="dot" /> Catalog online · {total ?? "—"} pieces
           </p>
-          <div className="hero-actions hero-line">
+          <h1 className="display">
+            <span className="line">
+              <span className="hero-line">Hardware</span>
+            </span>
+            <span className="line">
+              <span className="hero-line">
+                from the <em>near</em>
+              </span>
+            </span>
+            <span className="line">
+              <span className="hero-line">future.</span>
+            </span>
+          </h1>
+          <p className="lede hero-fade">
+            Phones, computers, sound, play, and the pieces that hold them together. Five
+            categories, one cart, nothing extra.
+          </p>
+          <div className="hero-actions hero-fade">
             <Link className="button" to="/shop">
-              Shop the catalog
+              Explore the catalog
+            </Link>
+            <a className="button ghost" href="#phones">
+              Take the tour
+            </a>
+          </div>
+        </div>
+        <div className="hero-mark" aria-hidden="true">
+          <div className="hero-halo" />
+          <LiquidMark size="100%" />
+        </div>
+        <div className="hero-scroll mono hero-fade" aria-hidden="true">
+          <span />
+          Scroll
+        </div>
+      </section>
+
+      <div className="marquee" aria-hidden="true">
+        <div className="marquee-track">
+          {[0, 1].map((copy) => (
+            <span key={copy}>
+              {CATEGORIES.map((category) => (
+                <span key={category.id}>
+                  {category.title}
+                  <i style={{ background: category.color }} />
+                </span>
+              ))}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <Voyage counts={counts} photos={photos} />
+
+      <section className="section wrap">
+        <header className="section-head reveal">
+          <div>
+            <p className="eyebrow mono">Signals</p>
+            <h2 className="title">One from every category.</h2>
+          </div>
+          <Link className="button ghost" to="/shop">
+            View all
+          </Link>
+        </header>
+        {error ? <p className="notice glass">{error}</p> : null}
+        <div className="grid">
+          {loading ? <CardSkeleton /> : featured.map((product) => (
+            <ProductCard key={product.id} product={product} />
+          ))}
+        </div>
+      </section>
+
+      <section className="stats wrap reveal">
+        <div className="stat glass">
+          <span className="mono">Pieces</span>
+          <strong>{total ?? "—"}</strong>
+        </div>
+        <div className="stat glass">
+          <span className="mono">Categories</span>
+          <strong>{CATEGORIES.length}</strong>
+        </div>
+        <div className="stat glass">
+          <span className="mono">From</span>
+          <strong>
+            {lowest === null
+              ? "—"
+              : new Intl.NumberFormat("en-NG", {
+                  style: "currency",
+                  currency: "NGN",
+                  maximumFractionDigits: 0,
+                }).format(lowest / 100)}
+          </strong>
+        </div>
+      </section>
+
+      <section className="cta wrap reveal">
+        <div className="cta-inner glass">
+          <p className="eyebrow mono">The edit</p>
+          <h2 className="title">Everything you need. Nothing you don&apos;t.</h2>
+          <div className="hero-actions">
+            <Link className="button" to="/shop">
+              Open the catalog
             </Link>
             <Link className="button ghost" to="/signup">
               Create an account
             </Link>
           </div>
         </div>
-        <div className="hero-stage">
-          <AetherScene />
-          <p className="stage-caption">A reference object. The catalog is the product.</p>
-        </div>
-      </section>
-
-      <section className="index-row wrap">
-        {ROOMS.map((room) => (
-          <a key={room.id} href={`#${room.id}`}>
-            <span>{room.index}</span>
-            {room.title}
-          </a>
-        ))}
-      </section>
-
-      {lead ? (
-        <section className="lead wrap reveal">
-          <div className="lead-media">
-            {lead.image?.url ? <img src={lead.image.url} alt="" /> : <span>{lead.category}</span>}
-          </div>
-          <div>
-            <p className="eyebrow">Start here</p>
-            <h2>{lead.name}</h2>
-            <p className="lede">{lead.description}</p>
-            <p className="price">{formatPrice(lead.price)}</p>
-            <Link className="button" to="/shop">
-              See it in the catalog
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
-      {notice ? <p className="notice wrap">{notice}</p> : null}
-
-      {rooms.map((room) => (
-        <section key={room.id} id={room.id} className="room wrap">
-          <header className="room-head reveal">
-            <p className="eyebrow">{room.index}</p>
-            <h2>{room.title}</h2>
-            <p>{room.line}</p>
-          </header>
-          <div className="grid">
-            {room.products.map((product) => (
-              <ProductCard key={product.id} product={product} onAdded={setNotice} />
-            ))}
-          </div>
-        </section>
-      ))}
-
-      <section className="close wrap reveal">
-        <div>
-          <p className="eyebrow">The edit</p>
-          <h2>Twenty pieces. Five rooms. Nothing extra.</h2>
-        </div>
-        <Link className="button" to="/shop">
-          Open the full catalog
-        </Link>
       </section>
     </div>
   );

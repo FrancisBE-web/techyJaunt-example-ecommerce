@@ -12,7 +12,7 @@ const {
 } = require("../helpers/cloudinary");
 
 const signUp = async (req, res) => {
-  const { firstName, lastName, email, password } = req.body;
+  const { firstName, lastName, email, password, phone } = req.body;
   try {
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -25,6 +25,7 @@ const signUp = async (req, res) => {
       lastName,
       email,
       password: hashedPassword,
+      phone,
     });
     const otp = assignOtp(newUser, "verify-email");
     await newUser.save();
